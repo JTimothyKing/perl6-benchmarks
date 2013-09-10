@@ -48,8 +48,8 @@ constant @default-algorithms = <
   =item Finds primes up to a series of maximums, using a series of algorithms, and
     reports the time taken (according the wall clock) in each case.
 
-  =item --min=10 --max=10000 --by=10 (the default) computes primes up to the following maxes:
-    10, 100, 1000, 10000
+  =item --min=10 --max=10_000 --by=10 (the default) computes primes up to the following maxes:
+    10, 100, 1_000, 10_000
 
   =item --warmup=N runs the algorithm N seconds before actually benchmarking.
     --warmup=30 is the default when running on the JVM. --warmup=0 is the default
@@ -63,12 +63,6 @@ constant @default-algorithms = <
     any any-upto-sqrt
     loop loop-upto-sqrt loop-gather-upto-sqrt inline-loop-upto-sqrt
     cached
-
-  =item This program runs the test multiple times, to provide at least 2 significant
-    digits of precision.
-
-NOTE: This script requires a hacked version of Benchmark.
-It will not work unless you're pulling the hacked version from the script's ./lib.
 =end USAGE
 
 
@@ -129,8 +123,8 @@ sub test-primes (:&primes-fn, Int :@maxes,
 
     say "$me: Benchmarking {&primes-fn.name}()...";
     my %benchmarks = timethese(min-iters => $min-benchmark-iterations,
-                            min-time => $min-benchmark-seconds,
-                            code => %benchmark-code);
+                               min-time => $min-benchmark-seconds,
+                               code => %benchmark-code);
 
     for @maxes -> $max {
         my $num-primes = %primes{$max}.elems;
@@ -148,7 +142,9 @@ sub test-primes (:&primes-fn, Int :@maxes,
 }
 
 
-sub MAIN (Int :$min = 10, Int :$max = 10_000, Int :$by = 10,
+sub MAIN (Int :$min = $default-min,
+          Int :$max = $default-max,
+          Int :$by = $default-by,
           Numeric :$warmup = $default-warmup,
           Int :$min-iters = $default-min-iters,
           Numeric :$min-seconds = $default-min-seconds,
