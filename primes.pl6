@@ -31,7 +31,7 @@ constant @default-algorithms = <
     native
     any any-upto-sqrt any-upto-int-sqrt
     my-any
-    loop loop-upto-sqrt loop-upto-int-sqrt loop-gather-upto-int-sqrt
+    loop loop-max loop-accumulate-or loop-upto-sqrt loop-upto-int-sqrt loop-gather-upto-int-sqrt
     inline-loop-upto-int-sqrt
     cached
 >;
@@ -65,7 +65,7 @@ constant @default-algorithms = <
     native
     any any-upto-sqrt any-upto-int-sqrt
     my-any
-    loop loop-upto-sqrt loop-upto-int-sqrt loop-gather-upto-int-sqrt
+    loop loop-max loop-accumulate-or loop-upto-sqrt loop-upto-int-sqrt loop-gather-upto-int-sqrt
     inline-loop-upto-int-sqrt
     cached
 =end USAGE
@@ -250,6 +250,36 @@ sub primes-dummy (Int $max) {
     return 1 .. $max;
 }
 
+sub primes-count (Int $max) {
+#=[ For testing:
+    Counts the number of trial divisions required and reports to $*OUT. ]
+
+    my Int @primes;
+
+    my $num-max = 0;
+    my $num-till-found = 0;
+    my $num-till-sqrt = 0;
+
+    loop (my $n = 2; $n <= $max; $n++) {
+        my Num $sqrt-n = sqrt $n;
+        # Use a loop-exit flag because labels are not implemented yet in Rakudo
+        my Bool $is-prime = True; # assume until proven otherwise
+        for @primes -> Int $prime {
+            $num-max++;
+            $num-till-found++ unless !$is-prime;
+            $num-till-sqrt++ unless !$is-prime || $prime > $sqrt-n;
+            $is-prime = False if $n %% $prime;
+        }
+        @primes.push($n) if $is-prime;
+    }
+
+    print "$me: primes-count($max) found { @primes.elems } primes\n",
+        "  $num-max maximum trial divisions\n",
+        "  $num-till-found when bailing out after a match is found\n",
+        "  $num-till-sqrt when testing only up to sqrt\n";
+
+    return @primes;
+}
 
 
 sub primes-functional (Int $max) {
@@ -321,6 +351,38 @@ sub primes-my-any (Int $max) {
 sub primes-loop (Int $max) {
 #=[ Compiles a list of primes that aren't divisible by any previous primes,
     for each candidate from C<2..$max>, but uses a loop rather than the C<any> operator. ]
+
+    my Int @primes;
+    @primes.push($_) unless $_ %%-any @primes for 2 .. $max;
+    return @primes;
+}
+
+sub primes-loop-max (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any previous primes,
+    for each candidate from C<2..$max>, using a loop rather than the C<any> operator,
+    but doing every possible trial division (even after a match is found). ]
+
+    my sub infix:<%%-any> (Int $n, @a --> Bool) is equiv(&infix:<upto>) is assoc<non> {
+        my $is-divisible = False;
+        $is-divisible=True if $n %% $_ for @a;
+        return $is-divisible;
+    }
+
+    my Int @primes;
+    @primes.push($_) unless $_ %%-any @primes for 2 .. $max;
+    return @primes;
+}
+
+sub primes-loop-accumulate-or (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any previous primes,
+    for each candidate from C<2..$max>, using a loop rather than the C<any> operator,
+    but doing every possible trial division and oring the results together. ]
+
+    my sub infix:<%%-any> (Int $n, @a --> Bool) is equiv(&infix:<upto>) is assoc<non> {
+        my $is-divisible = False;
+        $is-divisible ?|= $n %% $_ for @a;
+        return $is-divisible;
+    }
 
     my Int @primes;
     @primes.push($_) unless $_ %%-any @primes for 2 .. $max;
