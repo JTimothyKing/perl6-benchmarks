@@ -5,6 +5,7 @@ my $me;
 BEGIN {
     my ($script-vol, $script-dir, $script-pl) = IO::Spec.splitpath($*PROGRAM_NAME);
     $me = $script-pl || 'primes';
+    $script-dir ||= '.';
 
     # Add script's ./lib to @*INC
     my $libdir = IO::Spec.catpath( $script-vol, IO::Spec.catdir($script-dir, 'lib'), '' );
@@ -28,8 +29,10 @@ constant $default-min-seconds = 60;
 
 constant @default-algorithms = <
     native
-    any any-upto-sqrt
-    loop loop-upto-sqrt loop-gather-upto-sqrt inline-loop-upto-sqrt
+    any any-upto-sqrt any-upto-int-sqrt
+    my-any
+    loop loop-upto-sqrt loop-upto-int-sqrt loop-gather-upto-int-sqrt
+    inline-loop-upto-int-sqrt
     cached
 >;
 
@@ -60,8 +63,10 @@ constant @default-algorithms = <
 
   =item If no algorithms are specified, defaults to the following list:
     native
-    any any-upto-sqrt
-    loop loop-upto-sqrt loop-gather-upto-sqrt inline-loop-upto-sqrt
+    any any-upto-sqrt any-upto-int-sqrt
+    my-any
+    loop loop-upto-sqrt loop-upto-int-sqrt loop-gather-upto-int-sqrt
+    inline-loop-upto-int-sqrt
     cached
 =end USAGE
 
@@ -91,6 +96,39 @@ sub infix:<%%-any> (Int $n, @a --> Bool) is equiv(&infix:<upto>) is assoc<non> {
 }
 
 
+# A custom implementation of the "any" junction, to compare to the built-in Junction.
+# Note that this implementation adds undocumented methods to the MyJunction type,
+# which are not present on the built-in Junction type.
+# Also note that MyJunction derives from Any, not Mu, because the %% operator only
+# accepts parameters of Any (not Mu). Rakudo's Junction class avoids this through
+# AUTOTHREAD magic (and some pretty obfuscated code).
+
+class MyJunction is Any {
+    has @.members;
+
+    method do-op (&op --> MyJunction) {
+        return self.new( members => [ &op($_) for @.members ] );
+    }
+
+    method Bool() { ... }
+}
+
+class MyAnyJunction is MyJunction {
+    method Bool () {
+        return True if ?($_) for @.members;
+        return False;
+    }
+}
+
+multi sub infix:<%%> ($n, MyJunction $j) {
+    return $j.do-op( $n %% * );
+}
+
+sub my-any (@a) {
+    return MyAnyJunction.new(members => @a);
+}
+
+
 sub test-primes (:&primes-fn, Int :@maxes,
                  Numeric :$warmup-seconds = $default-warmup,
                  Int :$min-benchmark-iterations = $default-min-iters,
@@ -104,11 +142,13 @@ sub test-primes (:&primes-fn, Int :@maxes,
 
     my sub primes-with-check($max) {
         my @primes-this-iter = &primes-fn($max);
-        if ! %primes-error{$max} && @primes-this-iter != %primes{$max} {
-            %primes-error{$max} = True;
-            note "$me: {&primes-fn.name}($max) returned an incorrect list of primes\n",
-              " expected = {%primes{$max}.perl}\n",
-              " observed = {@primes-this-iter.perl}\n";
+        if @primes-this-iter != %primes{$max} {
+            if ! %primes-error{$max} {
+                %primes-error{$max} = True;
+                note "$me: {&primes-fn.name}($max) returned an incorrect list of primes\n",
+                  " expected = {%primes{$max}.perl}\n",
+                  " observed = {@primes-this-iter.perl}\n";
+            }
         }
         return @primes-this-iter;
     }
@@ -142,7 +182,7 @@ sub test-primes (:&primes-fn, Int :@maxes,
 }
 
 
-sub MAIN (Int :$min = $default-min,
+multi sub MAIN (Int :$min = $default-min,
           Int :$max = $default-max,
           Int :$by = $default-by,
           Numeric :$warmup = $default-warmup,
@@ -160,7 +200,7 @@ sub MAIN (Int :$min = $default-min,
 
     my @fns = @algorithms-to-benchmark.map( -> $name {
         my $fn = &::("primes-$name");
-        $fn.defined or die "$me: There is no function prime-{$name}()";
+        $fn.defined or die "$me: There is no function primes-{$name}()";
         $fn;
     });
 
@@ -174,25 +214,50 @@ sub MAIN (Int :$min = $default-min,
 
 sub USAGE () {
     use Pod::To::Text;
-    say pod2text( $=pod.grep({.name eq 'USAGE'}) );
+    say pod2text( $=pod.grep({ try .name eq 'USAGE' }) );
+}
+
+multi sub MAIN (Bool :$raw-pod) {
+    say $=pod.gist;
 }
 
 
+# Of all the different declarator POD block styles documented in S26, this is one of the
+# only ones that does not cause Rakudo to choke. None of them work as advertised.
+# However, I did discover that putting a single-line #= block BEFORE the declaration
+# caused Rakudo to successfully grok it the way that S26 claims a #| block ought to
+# behave. Not all of these function POD blocks will fit on a single line, however. And
+# the #= POD is supposed to bind to the PRECEDING (not the succeeding) code construct.
+# The way the #=[ ] blocks are arranged here is not my preferred style--I prefer a #|[ ]
+# block before the function declaration--and the #=[ ] block after the declaration do not
+# work correctly in Rakudo--they don't seem to be picked up by $=pod at all, but at least
+# they don't cause the lexer to choke and die. Maybe they will begin working in some
+# future build of the P6 implementation.
 
-# For testing:
-# Doesn't actually return primes, but returns a different result for each positive $max.
+
+
+sub primes-nil (Int $max) {
+#=[ For testing:
+    Always returns Nil. ]
+
+    return Nil;
+}
+
 sub primes-dummy (Int $max) {
+#=[ For testing:
+    Doesn't actually return primes, but returns a different result for each positive $max. ]
+
     return 1 .. $max;
 }
 
 
 
-# DOESN'T WORK (yet?)
 sub primes-functional (Int $max) {
-    # Translation into P6 of the naïve Haskell:
-    #   primes = sieve [2..]
-    #   sieve (p : xs) = p : sieve [x | x <− xs, x `mod` p > 0]
-    # (which does NOT actually implement a sieve)
+#=[ DOESN'T WORK (yet?)
+    Translation into P6 of the naïve Haskell:
+        primes = sieve [2..]
+        sieve (p : xs) = p : sieve [x | x <− xs, x `mod` p > 0]
+    (which does NOT actually implement a sieve) ]
 
     my sub filter-non-primes (*@xs) {
         my $p = @xs.shift;
@@ -211,48 +276,140 @@ sub primes-functional (Int $max) {
 # See https://rt.perl.org/rt3/Ticket/Display.html?id=66892
 
 sub primes-native (Int $max) {
+#=[ Finds primes by calling the Perl 6 .is-prime method on each candidate from C<2..$max>. ]
+
     grep({.is-prime}, 2 .. $max);
 }
 
 sub primes-any (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any previous primes,
+    for each candidate from C<2..$max>. ]
+
     my Int @primes;
     @primes.push($_) unless $_ %% any(@primes) for 2 .. $max;
     return @primes;
 }
 
 sub primes-any-upto-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the square root of each candidate prime, for each candidate from C<2..$max>. ]
+
     my Int @primes;
     @primes.push($_) unless $_ %% any(@primes upto sqrt $_) for 2 .. $max;
     return @primes;
 }
 
+sub primes-any-upto-int-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the truncated square root of each candidate prime (to force integer comparisons),
+    for each candidate from C<2..$max>. ]
+
+    my Int @primes;
+    @primes.push($_) unless $_ %% any(@primes upto truncate sqrt $_) for 2 .. $max;
+    return @primes;
+}
+
+sub primes-my-any (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any previous primes,
+    for each candidate from C<2..$max>, using a custom junction type. ]
+
+    my Int @primes;
+    @primes.push($_) unless $_ %% my-any(@primes) for 2 .. $max;
+    return @primes;
+}
+
 sub primes-loop (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any previous primes,
+    for each candidate from C<2..$max>, but uses a loop rather than the C<any> operator. ]
+
     my Int @primes;
     @primes.push($_) unless $_ %%-any @primes for 2 .. $max;
     return @primes;
 }
 
 sub primes-loop-upto-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the square root of each candidate prime, for each candidate from C<2..$max>,
+    but uses a loop rather than the C<any> operator. ]
+
     my Int @primes;
     @primes.push($_) unless $_ %%-any (@primes upto sqrt $_) for 2 .. $max;
     return @primes;
 }
 
-sub primes-loop-gather-upto-sqrt (Int $max) {
+sub primes-loop-upto-int-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the truncated square root of each candidate prime (to force integer comparisons),
+    for each candidate from C<2..$max>, but uses a loop rather than the C<any> operator. ]
+
     my Int @primes;
-    @primes.push($_) unless $_ %%-any (@primes gather-upto sqrt $_) for 2 .. $max;
+    @primes.push($_) unless $_ %%-any (@primes upto truncate sqrt $_) for 2 .. $max;
+    return @primes;
+}
+
+sub primes-loop-gather-upto-int-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the truncated square root of each candidate prime (to force integer comparisons),
+    and uses C<gather> to find the list of primes up to the truncate of the square root
+    (to force lazy evaluation), for each candidate from C<2..$max>,
+    but uses a loop rather than the C<any> operator. ]
+
+    my Int @primes;
+    @primes.push($_) unless $_ %%-any (@primes gather-upto truncate sqrt $_) for 2 .. $max;
+    return @primes;
+}
+
+sub primes-inline-loop (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any previous primes,
+    for each candidate from C<2..$max>, but uses a loop rather than the C<any> operator,
+    and compiles no intermediate lists in the process. ]
+
+    my Int @primes;
+    loop (my $n = 2; $n <= $max; $n++) {
+        # Use a loop-exit flag because labels are not implemented yet in Rakudo
+        my Bool $is-prime = True; # assume until proven otherwise
+        for @primes -> Int $prime {
+            ($is-prime = False, last) if $n %% $prime;
+        }
+        @primes.push($n) if $is-prime;
+    }
     return @primes;
 }
 
 sub primes-inline-loop-upto-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the square root of each candidate prime, for each candidate from C<2..$max>,
+    but uses a loop rather than the C<any> operator,
+    and compiles no intermediate lists in the process. ]
+
     my Int @primes;
     loop (my $n = 2; $n <= $max; $n++) {
-        my $sqrt-n = sqrt $n;
+        my Num $sqrt-n = sqrt $n;
         # Use a loop-exit flag because labels are not implemented yet in Rakudo
-        my $is-prime = True; # assume until proven otherwise
-        for @primes -> $prime {
+        my Bool $is-prime = True; # assume until proven otherwise
+        for @primes -> Int $prime {
             ($is-prime = False, last) if $n %% $prime;
-            last if $prime > $sqrt-n;
+            last if $prime >= $sqrt-n; # OK to bail out if ==, because checked %% above
+        }
+        @primes.push($n) if $is-prime;
+    }
+    return @primes;
+}
+
+sub primes-inline-loop-upto-int-sqrt (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the truncated square root of each candidate prime (to force integer comparisons),
+    for each candidate from C<2..$max>, but uses a loop rather than the C<any> operator,
+    and compiles no intermediate lists in the process. ]
+
+    my Int @primes;
+    loop (my $n = 2; $n <= $max; $n++) {
+        my Int $sqrt-n = truncate sqrt $n;
+        # Use a loop-exit flag because labels are not implemented yet in Rakudo
+        my Bool $is-prime = True; # assume until proven otherwise
+        for @primes -> Int $prime {
+            ($is-prime = False, last) if $n %% $prime;
+            last if $prime >= $sqrt-n; # OK to bail out if ==, because checked %% above
         }
         @primes.push($n) if $is-prime;
     }
@@ -260,8 +417,14 @@ sub primes-inline-loop-upto-sqrt (Int $max) {
 }
 
 sub primes-cached (Int $max) {
+#=[ Compiles a list of primes that aren't divisible by any of the previous primes
+    up to the truncated square root of each candidate prime (to force integer comparisons),
+    for each candidate from C<2..$max>, using a loop rather than the C<any> operator,
+    and storing already-found primes in a C<state> variable (so that successive calls will
+    merely copy cached values). ]
+
     state Int @primes = 2;
-    @primes.push($_) unless $_ %%-any (@primes upto sqrt $_) for @primes[*-1]+1 .. $max;
+    @primes.push($_) unless $_ %%-any (@primes upto truncate sqrt $_) for @primes[*-1]+1 .. $max;
     return @primes upto $max;
 }
 
