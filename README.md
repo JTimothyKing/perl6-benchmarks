@@ -1,7 +1,7 @@
-primes
-======
+perl6-benchmarks
+================
 
-Demo/benchmarking code that finds prime numbers in Perl 6
+Demo/benchmarking code in Perl 6
 
 This project contains sample code for a series of [introspective evaluations of Perl 6,](http://sd.jtimothyking.com/2013/09/09/perl-6-and-the-price-of-elegant-code/) published at sd.JTimothyKing.com.
 
@@ -11,14 +11,14 @@ To run the script
 -----------------
 
 ```
-$ cd primes
+$ cd perl6-benchmarks
 $ ./primes.pl6
 ```
 
 Or feel free to run it with any P6 interpreter you want. For example:
 
 ```
-$ rakudo/install-jvm/bin/perl6 primes/primes.pl6
+$ rakudo/install-jvm/bin/perl6 perl6-benchmarks/primes.pl6
 ```
 
 The script supports a number of options to limit, expand, and tweak the benchmarking parameters. Display a usage message with:
