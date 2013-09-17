@@ -74,7 +74,7 @@ constant @default-algorithms = <
 # The following operators really want to be "is equiv(&infix:<X>)"
 # but see https://rt.perl.org/rt3/Ticket/Display.html?id=119589
 
-# Should be infix:<%%-any> (Int $n, Int @a --> Bool)
+# Might want to be infix:<%%-any> (Int $n, Int @a --> Bool)
 # and infix:<upto> (Numeric ::T @a, Numeric $n --> Array[T])
 # but Rakudo chokes on these, too,
 # because parametric types don't seem to be (fully?) implemented yet,
@@ -82,17 +82,17 @@ constant @default-algorithms = <
 # (see https://rt.perl.org/rt3/Ticket/Display.html?id=66892)
 # and therefore can't pass them to other functions.
 
-sub infix:<upto> (@a, Numeric $max) is looser(&infix:<==>) is assoc<left> {
+sub infix:<%%-any> ($n, @a --> Bool) is looser(&infix:<==>) is assoc<non> {
+    return True if $n %% $_ for @a;
+    return False;
+}
+
+sub infix:<upto> (@a, $max) is equiv(&infix:<%%-any>) is assoc<left> {
     return (for @a { if $_ <= $max { $_ } else { last } });
 }
 
-sub infix:<gather-upto> (@a, Numeric $max) is equiv(&infix:<upto>) is assoc<left> {
+sub infix:<gather-upto> (@a, $max) is equiv(&infix:<%%-any>) is assoc<left> {
     return gather for @a { if $_ <= $max { take $_ } else { last } };
-}
-
-sub infix:<%%-any> (Int $n, @a --> Bool) is equiv(&infix:<upto>) is assoc<non> {
-    return True if $n %% $_ for @a;
-    return False;
 }
 
 
